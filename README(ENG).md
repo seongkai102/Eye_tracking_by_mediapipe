@@ -94,6 +94,12 @@ The scaling factor `k` ensures sensitivity adjustments remain within a valid ran
 
 ---
 
+## Warnings
+- **Webcam performance** may affect the experience.
+- **Monitor size** can sometimes influence the perceived tracking accuracy.
+
+---
+
 ## How to Use
 
 1. Run the script.
