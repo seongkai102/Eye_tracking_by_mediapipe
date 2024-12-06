@@ -6,30 +6,30 @@ from collections import deque
 import math
 import time
 
-def get_average_iris_center(landmarks, image_shape):
-    right_iris = landmarks[RIGHT_IRIS_CENTER_IDX]
-    left_iris = landmarks[LEFT_IRIS_CENTER_IDX]
-    avg_x = ((right_iris.x + left_iris.x) / 2) * image_shape[1]
-    avg_y = ((right_iris.y + left_iris.y) / 2) * image_shape[0]
+def get_average_iris_position(landmarks, frame_shape):
+    right_eye_center = landmarks[RIGHT_EYE_IDX]
+    left_eye_center = landmarks[LEFT_EYE_IDX]
+    avg_x = ((right_eye_center.x + left_eye_center.x) / 2) * frame_shape[1]
+    avg_y = ((right_eye_center.y + left_eye_center.y) / 2) * frame_shape[0]
     return avg_x, avg_y
 
-def adjust_range_by_distance(delta_z, base_range_x=1.0, base_range_y=1.0):
-    scaling_factor = 0.02
-    clamped_delta_z = max(min(delta_z, 0.2), -0.2)
+def calculate_range_adjustment(depth_difference, base_x_range=1.0, base_y_range=1.0):
+    adjustment_factor = 0.02
+    clamped_depth_difference = max(min(depth_difference, 0.2), -0.2)
 
-    if clamped_delta_z < 0:
-        scaled_delta_z = math.log1p(abs(clamped_delta_z)) * (-2)
+    if clamped_depth_difference < 0:
+        scaled_depth_difference = math.log1p(abs(clamped_depth_difference)) * (-2)
     else:
-        scaled_delta_z = math.log1p(abs(clamped_delta_z))
+        scaled_depth_difference = math.log1p(abs(clamped_depth_difference))
 
-    factor = 1 + (-scaled_delta_z) * scaling_factor
-    return base_range_x * factor, base_range_y * factor
+    scale = 1 + (-scaled_depth_difference) * adjustment_factor
+    return base_x_range * scale, base_y_range * scale
 
 
 pyautogui.FAILSAFE = False
 
 mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(
+face_detection = mp_face_mesh.FaceMesh(
     static_image_mode=False,
     max_num_faces=1,
     refine_landmarks=True,
@@ -37,118 +37,115 @@ face_mesh = mp_face_mesh.FaceMesh(
     min_tracking_confidence=0.5
 )
 
-RIGHT_IRIS_CENTER_IDX = 470
-LEFT_IRIS_CENTER_IDX = 475
-NOSE_LANDMARK = 6
+RIGHT_EYE_IDX = 470
+LEFT_EYE_IDX = 475
+NOSE_IDX = 6
 
-cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) 
+camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+camera.set(cv2.CAP_PROP_BUFFERSIZE, 1) 
 
 screen_width, screen_height = pyautogui.size()
 
-origin_x, origin_y, origin_z = 0, 0, 0
-x_values = deque(maxlen=10)
-y_values = deque(maxlen=10)
-z_values = deque(maxlen=10)
+calibrated_x, calibrated_y, calibrated_depth = 0, 0, 0
+x_coords = deque(maxlen=10)
+y_coords = deque(maxlen=10)
+depth_coords = deque(maxlen=10)
 
-# 개수 늘릴수록 정확도 증가 그러나 감도(민감도)는 감소
-mouse_x_history = deque(maxlen=9)
-mouse_y_history = deque(maxlen=9)
+mouse_x_movements = deque(maxlen=9)
+mouse_y_movements = deque(maxlen=9)
 
-SMOOTHING_ALPHA = 1
+SMOOTHING_WEIGHT = 1
 
-# 기준점 설정
-def center():
+def calibrate_center():
     start_time = None
     while True:
         
-        global origin_x, origin_y, origin_z
-        success, image = cap.read()
+        global calibrated_x, calibrated_y, calibrated_depth
+        success, frame = camera.read()
         if not success:
-            raise Exception("카메라를 열 수 없습니다.")
+            raise Exception("no camera")
 
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb_image)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = face_detection.process(rgb_frame)
 
         if results.multi_face_landmarks:
-            if start_time is None:  # 시작 시간 설정
+            if start_time is None:  # start time set
                 start_time = time.time()
 
             elapsed_time = time.time() - start_time
-            if elapsed_time <= 3:  # 3초 동안만 데이터 추가
-                landmarks = results.multi_face_landmarks[0].landmark
-                current_x, current_y = get_average_iris_center(landmarks, image.shape)
-                current_z = landmarks[NOSE_LANDMARK].z
+            if elapsed_time <= 3:  # data append for a 3 second
+                face_landmarks = results.multi_face_landmarks[0].landmark
+                current_x, current_y = get_average_iris_position(face_landmarks, frame.shape)
+                current_depth = face_landmarks[NOSE_IDX].z
 
-                x_values.append(current_x)
-                y_values.append(current_y)
-                z_values.append(current_z)
+                x_coords.append(current_x)
+                y_coords.append(current_y)
+                depth_coords.append(current_depth)
 
-                if len(x_values) == x_values.maxlen:
-                    origin_x = sum(x_values) / len(x_values)
-                    origin_y = sum(y_values) / len(y_values)
-                    origin_z = sum(z_values) / len(z_values)
-                    print(origin_x, origin_y, origin_z)
+                if len(x_coords) == x_coords.maxlen:
+                    calibrated_x = sum(x_coords) / len(x_coords)
+                    calibrated_y = sum(y_coords) / len(y_coords)
+                    calibrated_depth = sum(depth_coords) / len(depth_coords)
+                    print(calibrated_x, calibrated_y, calibrated_depth)
                     break
             else:
-                print("3초가 지났습니다. 데이터 추가 중지.")
+                print("stop")
                 break
 
         if cv2.waitKey(10) & 0xFF == 27:
             break
 
-def eye_track():
-    # 메인 실행
-    while cap.isOpened():
-        success, image = cap.read()
+def track_eye_movement():
+    while camera.isOpened():
+        success, frame = camera.read()
         if not success:
             break
 
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb_image)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = face_detection.process(rgb_frame)
 
         if results.multi_face_landmarks:
-            landmarks = results.multi_face_landmarks[0].landmark
-            current_x, current_y = get_average_iris_center(landmarks, image.shape)
-            current_z = landmarks[NOSE_LANDMARK].z
+            face_landmarks = results.multi_face_landmarks[0].landmark
+            current_x, current_y = get_average_iris_position(face_landmarks, frame.shape)
+            current_depth = face_landmarks[NOSE_IDX].z
 
-            delta_z = origin_z - current_z
-            range_x, range_y = adjust_range_by_distance(delta_z)
+            depth_difference = calibrated_depth - current_depth
+            x_range, y_range = calculate_range_adjustment(depth_difference)
 
-            SENSITIVITY_FACTOR = 0.3312345   # 감도 조절 인자 (0과 1 사이의 값)
+            SENSITIVITY = 0.3312345  # 감도 조절 인자 (range : 0~1)
 
-            delta_x = (current_x - origin_x) * SENSITIVITY_FACTOR
-            delta_y = (current_y - origin_y) * SENSITIVITY_FACTOR
+            x_offset = (current_x - calibrated_x) * SENSITIVITY
+            y_offset = (current_y - calibrated_y) * SENSITIVITY
 
-            raw_mouse_x = np.interp(-delta_x, [-range_x, range_x], [-1, screen_width])
-            raw_mouse_y = np.interp(delta_y, [-range_y, range_y], [0, screen_height])
+            raw_mouse_x = np.interp(-x_offset, [-x_range, x_range], [-1, screen_width])
+            raw_mouse_y = np.interp(y_offset, [-y_range, y_range], [0, screen_height])
 
-            mouse_x_history.append(raw_mouse_x)
-            mouse_y_history.append(raw_mouse_y)
+            mouse_x_movements.append(raw_mouse_x)
+            mouse_y_movements.append(raw_mouse_y)
 
-            smoothed_mouse_x = SMOOTHING_ALPHA * np.mean(mouse_x_history) + (1 - SMOOTHING_ALPHA) * raw_mouse_x
-            smoothed_mouse_y = SMOOTHING_ALPHA * np.mean(mouse_y_history) + (1 - SMOOTHING_ALPHA) * raw_mouse_y
+            smoothed_mouse_x = SMOOTHING_WEIGHT * np.mean(mouse_x_movements) + (1 - SMOOTHING_WEIGHT) * raw_mouse_x
+            smoothed_mouse_y = SMOOTHING_WEIGHT * np.mean(mouse_y_movements) + (1 - SMOOTHING_WEIGHT) * raw_mouse_y
 
             pyautogui.moveTo(smoothed_mouse_x, smoothed_mouse_y)
 
-            cv2.imshow('show', image)
+            cv2.imshow('show', frame)
             if smoothed_mouse_x == -1.0:
                 print(1)
                 break
 
         else:
-            cv2.imshow('show', image)
+            cv2.imshow('show', frame)
 
         if cv2.waitKey(1) & 0xFF == 27:  # ESC 키를 누르면 종료
             break
 
-    cap.release()
+    camera.release()
     cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
-    center()
-    eye_track()
+    calibrate_center()
+    track_eye_movement()
