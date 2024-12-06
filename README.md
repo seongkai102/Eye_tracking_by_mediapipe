@@ -13,7 +13,7 @@
 
 1. **홍채 중심 좌표 추출**:
    - MediaPipe의 `face_mesh`를 이용해 **좌우 홍채**의 좌표를 추출합니다.
-   - 두 홍채의 평균 값을 계산합니다:
+   - 두 홍채의 평균값을 계산합니다:
      \[
      x_{	ext{iris}} = rac{x_{	ext{right}} + x_{	ext{left}}}{2}, \quad 
      y_{	ext{iris}} = rac{y_{	ext{right}} + y_{	ext{left}}}{2}
@@ -21,7 +21,7 @@
 
 2. **기준점 설정**:
    - **3초 동안** 사용자가 모니터 중심을 응시하며 홍채 좌표를 수집합니다.
-   - 수집된 좌표의 **평균값**을 기준점으로 설정합니다:
+   - 수집된 좌표의 평균값을 기준점으로 설정합니다:
      \[
      	ext{origin}_x = rac{\sum_{i=1}^N x_{	ext{iris}, i}}{N}, \quad 
      	ext{origin}_y = rac{\sum_{i=1}^N y_{	ext{iris}, i}}{N}, \quad
